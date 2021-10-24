@@ -12,6 +12,7 @@ type Message =
     | PeerRing of IActorRef[]
     | RequestCompletion
     | SendRequest
+    | ExitCircle of IActorRef // This can also essentiially have just the id to the current node
     | B of int
     | C of int
 
@@ -70,6 +71,7 @@ type Peer(processController: IActorRef, requests: int) =
             | SendRequest ->
                 if(messageRequests = totlRequests){
                     processController <! RequestCompletion
+                    //Also send ExitCircle message to all the nodes in routing table
                 } else {
                     //Send a request for a random peer over here
                     
