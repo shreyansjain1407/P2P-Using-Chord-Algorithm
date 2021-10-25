@@ -14,6 +14,7 @@ type Message =
     | RequestCompletion
     | SendRequest
     | ExitCircle of IActorRef // This can also essentiially have just the id to the current node
+    | StartRequesting //This message will start the scheduler which will then start sending request messages
     | B of int
     | C of int
 
@@ -47,14 +48,18 @@ type Peer(processController: IActorRef, requests: int) =
     //Counter to keep track of message requests sent by the given peer
     let mutable messageRequests = 0
 
+    //################################################################################
+    //THIS HAS BEEN IMPLEMENTED AND THE COMMENTS NEED TO BE REMOVED BEFORE SUBMISSION OF THE FILE
+    //################################################################################
     //This while loop needs to be replaced with a scheduling function that automatically
     //sends a message every second according to the project spec something similar to:
     //https://www.dotkam.com/2011/10/11/akka-scheduler-sending-message-to-actors-self-on-start/
-    //################################################################################
+    
     // while messageRequests < totalRequests do
     //     Actor.Context.Self <! SendRequest
 
-    Actor.Context.System.Scheduler.ScheduleTellRepeatedly(....)
+    // Actor.Context.System.Scheduler.ScheduleTellRepeatedly(....)
+
     //Actor.Context.Dispatcher 
     //This is supposed to be used for automated message scheduling
     //What we can also do is to run a loop in the primary execution space that will implement
@@ -67,6 +72,10 @@ type Peer(processController: IActorRef, requests: int) =
         match receivedMsg :?> Message with
             | A int ->
                 ()
+            | StartRequesting ->
+                //Starts Scheduler to schedule SendRequest Message to self mailbox
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
+                
             | SendRequest ->
                 if(messageRequests = requests) then
                     processController <! RequestCompletion
