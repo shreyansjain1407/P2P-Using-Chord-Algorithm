@@ -10,7 +10,7 @@ open Akka.Configuration
 type Message =
     | A of int
     | SetTotalNodes of int
-    | PeerRing of IActorRef[]
+    // | PeerRing of IActorRef[]
     | RequestCompletion
     | SendRequest
     | ExitCircle of IActorRef // This can also essentiially have just the id to the current node
@@ -38,11 +38,11 @@ type ProcessController(nodes: int) =
                     printfn "All the nodes have completed the number of requests to be made"
             | _ -> ()
 
-type Peer(processController: IActorRef, requests: int) =
+type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     //Define required variables here
     //HashTable to be defined here
-    // let totalRequests = requests
+    let totalPeers = numNodes
     let fingerTable = Map.empty
     // successors.Add(processController, "23")
     //Counter to keep track of message requests sent by the given peer
@@ -82,6 +82,9 @@ type Peer(processController: IActorRef, requests: int) =
                     //Also send ExitCircle message to all the nodes in routing table
                 else 
                     //Send a request for a random peer over here
+                    let randomPeer = Random().Next(totalPeers)
+                    messageRequests <- messageRequests + 1
+                    //request for random peer to be sent here
                 ()
             | _ -> ()
 
@@ -103,5 +106,7 @@ processController <! SetTotalNodes(numNodes) //Initializing the total number of 
 let ring = Array.zeroCreate(numNodes)
 
 for i in [9 .. numNodes] do
-    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests), "Peer" + string i)
+    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes), "Peer" + string i)
 
+for i in [9 .. numNodes] do
+    ring.[i] <! StartRequesting
