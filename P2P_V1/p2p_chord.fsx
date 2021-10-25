@@ -14,6 +14,7 @@ type Message =
 type PeerMessage =
     | Init of int
     | SendRequest of int
+    | StartRequesting
 
 let system = ActorSystem.Create("System")
 
@@ -51,8 +52,9 @@ type Peer(ProcessController : IActorRef, requests : int) =
         match receivedMsg :?> PeerMessage with
             | Init id ->
                 nodeID <- id
-            | SendRequest requestID ->
-                    
+            | StartRequesting ->
+                //Starts Scheduler to schedule SendRequest Message to self mailbox
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
             | _ -> ()
     
 
