@@ -52,7 +52,7 @@ type Peer(ProcessController : IActorRef, requests : int) =
             | Init id ->
                 nodeID <- id
             | SendRequest requestID ->
-                    
+                ()
             | _ -> ()
     
 
