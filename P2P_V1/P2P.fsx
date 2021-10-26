@@ -33,7 +33,7 @@ type ProcessController(nodes: int) =
         match receivedMsg :?> Message with 
             | SetTotalNodes nodes ->
                 // totalNodes <- nodes
-                ()
+                printfn "This is just an initialization might not even be needed"
             | RequestCompletion ->
                 completedNodes <- completedNodes + 1
                 if(completedNodes = totalNodes) then
@@ -44,6 +44,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     //Define required variables here
     let totalPeers = numNodes
+    let mutable cancelRequesting = false
     //HashTable of the type <Int, Peer>
     let mutable fingerTable = Map.empty<int, Peer>
 
@@ -56,27 +57,30 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 printfn "Just some random function"
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
-                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest, Cancelable())
                 
             | SendRequest ->
                 if(messageRequests = requests) then
+                    cancelRequesting <- true
                     processController <! RequestCompletion
                     //Also send ExitCircle message to all the nodes in routing table
                 
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
+                // printfn "Send Message received, Message Index %i" messageRequests
                 messageRequests <- messageRequests + 1
                 // match fingerTable.TryFind(randomPeer) with
                 //     | some -> some <! Request(Actor.Context.Self)
                 if fingerTable.ContainsKey(randomPeer) then
                     let xyz = fingerTable.[randomPeer]
-                    xyz <! Request(Actor.Context.Self)
+                    printfn ""
+                    // xyz <! Request(Actor.Context.Self)
                 //request for random peer to be sent here
             | _ -> ()
 
 //Actual Working starts here
-let numNodes = int (string (fsi.CommandLineArgs.GetValue 1))
-let numRequests = int (string (fsi.CommandLineArgs.GetValue 2))
+let numNodes = 2//int (string (fsi.CommandLineArgs.GetValue 1))
+let numRequests = 10//int (string (fsi.CommandLineArgs.GetValue 2))
 
 let processController = system.ActorOf(Props.Create(typeof<ProcessController>, numNodes),"processController")
 
@@ -90,10 +94,11 @@ processController <! SetTotalNodes(numNodes) //Initializing the total number of 
 
 let ring = Array.zeroCreate(numNodes)
 
-for i in [9 .. numNodes] do
+for i in [0 .. numNodes-1] do
     ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes), "Peer" + string i)
 
-for i in [9 .. numNodes] do
+for i in [0 .. numNodes-1] do
+    printfn "Peer %i Started Queueing messages" i
     ring.[i] <! StartRequesting
 
 Console.ReadLine()
