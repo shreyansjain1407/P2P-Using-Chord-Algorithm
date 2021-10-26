@@ -130,7 +130,6 @@ for i in [0 .. numNodes-1] do
         // printfn "%i" x
         fingers.Add(x, ring.[x])
     printfn "The Map: %A" fingers
-    printfn "Wiii"
     ring.[i] <! SetFingerTable(fingers)
 
 for i in [0 .. numNodes-1] do
