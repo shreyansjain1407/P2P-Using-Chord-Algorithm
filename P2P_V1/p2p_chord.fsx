@@ -13,8 +13,9 @@ type Message =
 
 type PeerMessage =
     | Init of int
-    | SendRequest of int
+    | SendRequest of string
     | StartRequesting
+    | RequestComplete
 
 let system = ActorSystem.Create("System")
 
@@ -42,19 +43,38 @@ type ProcessController(nodes : int) =
 
 
 
-type Peer(ProcessController : IActorRef, requests : int) =
+type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     let totalRequests = requests
+    let totalPeers = numNodes
     let mutable nodeID = 0
     let mutable messageRequests = 0
-
+    let mutable nodeLocation = ""
     override x.OnReceive(receivedMsg) = 
         match receivedMsg :?> PeerMessage with
             | Init id ->
                 nodeID <- id
+                nodeLocation <- "akka://system/user/Peer" + string nodeID
+                ()
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
-                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest nodeLocation)
+            | SendRequest node ->
+                if(messageRequests = requests) then
+                    processController <! RequestCompletion 5
+                    //Also send ExitCircle message to all the nodes in routing table
+                else 
+                    //Send a request for a random peer over here
+                    let randomPeer = Random().Next(totalPeers)
+                    let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
+                    nodePeer.Anchor <! SendRequest node
+                    messageRequests <- messageRequests + 1
+                    printfn "node: %s: %i" nodeLocation messageRequests
+                    printfn "random: %s: %i" nodeLocation randomPeer
+                    //if(messageRequests = 2) then
+                        //(select node system).Anchor <! SendRequest node
+                    //request for random peer to be sent here
+                ()
             | _ -> ()
     
 
@@ -76,7 +96,11 @@ processController <! SetTotalNodes(numNodes) //Initializing the total number of 
 
 let ring = Array.zeroCreate(numNodes)
 
-for i in [9 .. numNodes] do
-    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests), "Peer" + string i)
-for i in [9 .. numNodes] do
+for i in [0 .. numNodes-1] do
+    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes), "Peer" + string i)
+for i in [0 .. numNodes-1] do
     ring.[i] <! Init(i)
+let randomPeer = Random().Next(numNodes)
+let nodePeer = "akka://system/user/Peer" + string randomPeer
+for i in [0 .. numNodes-1] do
+     ring.[i] <! SendRequest nodePeer
