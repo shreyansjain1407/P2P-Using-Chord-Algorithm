@@ -39,6 +39,9 @@ type ProcessController(nodes : int) =
                     let avgHops = (float numHops) / (float totalNodes)
                     printfn "All the nodes have completed the number of requests to be made"
                     printfn "Average number of hops: %.1f" avgHops
+                    Environment.Exit(0)
+                    //system.Terminate()
+                    ()
             | _ -> ()
 
 
@@ -89,7 +92,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
             | RequestComplete hops ->
                 messageRequests <- messageRequests + 1
                 totalHops <- totalHops + hops
-                if(messageRequests = requests) then
+                if(messageRequests >= requests) then
                     processController <! RequestCompletion totalHops
                 else
                     Actor.Context.Self <! SendRequest nodeLocation
@@ -122,4 +125,7 @@ for i in [0 .. numNodes-1] do
 let randomPeer = Random().Next(numNodes)
 let nodePeer = "akka://system/user/Peer" + string randomPeer
 for i in [0 .. numNodes-1] do
-     ring.[i] <! SendRequest nodePeer
+     ring.[i] <! StartRequesting
+     //ring.[i] <! SendRequest nodePeer
+
+Console.ReadLine()
