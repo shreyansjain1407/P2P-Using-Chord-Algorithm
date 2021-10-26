@@ -58,7 +58,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 nodeID <- id
                 nodeLocation <- "akka://system/user/Peer" + string nodeID
                 ring <- peers
-                ()
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest nodeLocation)
@@ -75,7 +74,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                     messageRequests <- messageRequests + 1
                     printfn "node: %s: %i" nodeLocation messageRequests
                     //request for random peer to be sent here
-                ()
             | _ -> ()
     
 
