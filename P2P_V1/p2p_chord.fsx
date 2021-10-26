@@ -12,7 +12,7 @@ type Message =
     | RequestCompletion of int
 
 type PeerMessage =
-    | Init of int
+    | Init of int * IActorRef[]
     | SendRequest of string
     | StartRequesting
     | RequestComplete
@@ -50,11 +50,14 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     let mutable nodeID = 0
     let mutable messageRequests = 0
     let mutable nodeLocation = ""
+    let mutable ring = Array.zeroCreate(numNodes)
+
     override x.OnReceive(receivedMsg) = 
         match receivedMsg :?> PeerMessage with
-            | Init id ->
+            | Init (id, peers) ->
                 nodeID <- id
                 nodeLocation <- "akka://system/user/Peer" + string nodeID
+                ring <- peers
                 ()
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
@@ -66,8 +69,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 else 
                     //Send a request for a random peer over here
                     let randomPeer = Random().Next(totalPeers)
-                    let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
-                    nodePeer.Anchor <! SendRequest node
+                    //let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
+                    let nodePeer = ring.[randomPeer]
+                    nodePeer <! SendRequest node
                     messageRequests <- messageRequests + 1
                     printfn "node: %s: %i" nodeLocation messageRequests
                     printfn "random: %s: %i" nodeLocation randomPeer
@@ -99,7 +103,7 @@ let ring = Array.zeroCreate(numNodes)
 for i in [0 .. numNodes-1] do
     ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes), "Peer" + string i)
 for i in [0 .. numNodes-1] do
-    ring.[i] <! Init(i)
+    ring.[i] <! Init(i, ring)
 let randomPeer = Random().Next(numNodes)
 let nodePeer = "akka://system/user/Peer" + string randomPeer
 for i in [0 .. numNodes-1] do
