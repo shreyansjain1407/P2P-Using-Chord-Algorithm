@@ -49,17 +49,22 @@ let table (index : int, m : int) =
     let upperBound = pown 2 (m-1)
     let mutable k = 1
     let mutable i = 0
-    while(k < upperBound) do
+    let mutable j = 1
+    while(j < upperBound) do
         fingerTable |> Map.add i k
+        printfn "%i" k
         if(k = 0) then
             k <- 1
         else
             k <- k * 2
+            j <- j * 2
         if(k > m) then
             k <- 0 + (k - m)
         i <- i + 1
+    fingerTable |> Map.iter (fun s n -> printfn "%i %i" s n)
     fingerTable
 
+table(1, 10)
 let selectPeerID (fingerTable : Map<int, int>, nodeID : int, desiredID : int) =
     let mutable peer = nodeID
     let mutable i =  0
