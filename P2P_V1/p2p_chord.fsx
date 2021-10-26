@@ -45,7 +45,6 @@ type ProcessController(nodes : int) =
             | _ -> ()
 
 
-
 type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     let totalRequests = requests
@@ -118,6 +117,7 @@ for i in [0 .. numNodes-1] do
 for i in [0 .. numNodes-1] do
     ring.[i] <! Init(i, ring)
 let randomPeer = Random().Next(numNodes)
+
 let nodePeer = "akka://system/user/Peer" + string randomPeer
 for i in [0 .. numNodes-1] do
      ring.[i] <! StartRequesting
