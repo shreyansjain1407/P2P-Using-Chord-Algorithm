@@ -62,7 +62,6 @@ let table (index : int, m : int) =
 
 let selectPeerID (fingerTable : Map<int, int>, nodeID : int, desiredID : int) =
     let mutable peer = nodeID
-    let mutable prevPeer = nodeID
     let mutable i =  0
     while (peer < desiredID) do
         peer <- fingerTable.[i]
