@@ -44,7 +44,31 @@ type ProcessController(nodes : int) =
                     ()
             | _ -> ()
 
+let table (index : int, m : int) =
+    let fingerTable = Map.empty<int, int>
+    let upperBound = pown 2 (m-1)
+    let mutable k = 1
+    let mutable i = 0
+    while(k < upperBound) do
+        fingerTable |> Map.add i k
+        if(k = 0) then
+            k <- 1
+        else
+            k <- k * 2
+        if(k > m) then
+            k <- 0 + (k - m)
+        i <- i + 1
+    fingerTable
 
+let selectPeerID (fingerTable : Map<int, int>, nodeID : int, desiredID : int) =
+    let mutable peer = nodeID
+    let mutable prevPeer = nodeID
+    let mutable i =  0
+    while (peer < desiredID) do
+        peer <- fingerTable.[i]
+        i <- i + 1
+    peer <- fingerTable.[i]
+    peer
 
 type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
@@ -55,6 +79,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     let mutable nodeLocation = ""
     let mutable totalHops = 0
     let mutable ring = Array.zeroCreate(numNodes)
+    let mutable fingerTable = Map.empty<int, int>
 
     override x.OnReceive(receivedMsg) = 
         match receivedMsg :?> PeerMessage with
@@ -62,6 +87,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 nodeID <- id
                 nodeLocation <- "akka://system/user/Peer" + string nodeID
                 ring <- peers
+                fingerTable <- table(nodeID, ring.Length)
                 ()
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
@@ -69,10 +95,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
             | SendRequest node ->
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-                let randomPeer2 = Random().Next(totalPeers)
-                //let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
-                let nodePeer = ring.[randomPeer]
-                nodePeer <! ReceiveRequest (nodeID, randomPeer2, 0) 
+                let nextPeerID = selectPeerID(fingerTable, nodeID, randomPeer)
+                let nodePeer = ring.[nextPeerID]
+                nodePeer <! ReceiveRequest (nodeID, randomPeer, 0) 
                 //printfn "Send Node: %s: %i" nodeLocation messageRequests
                 //request for random peer to be sent here
                 ()
@@ -81,9 +106,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 if(desiredID = nodeID) then
                     ring.[originalNode] <! RequestComplete numHops
                 else
-                    //printfn "Receive Node: %s: %i" nodeLocation numHops
                     let randomPeer = Random().Next(totalPeers)
-                    //let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
                     let nodePeer = ring.[randomPeer]
                     nodePeer <! ReceiveRequest (nodeID, desiredID, numHops) 
                 ()
