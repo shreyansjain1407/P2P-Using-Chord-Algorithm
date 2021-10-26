@@ -74,9 +74,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                     nodePeer <! SendRequest node
                     messageRequests <- messageRequests + 1
                     printfn "node: %s: %i" nodeLocation messageRequests
-                    printfn "random: %s: %i" nodeLocation randomPeer
-                    //if(messageRequests = 2) then
-                        //(select node system).Anchor <! SendRequest node
                     //request for random peer to be sent here
                 ()
             | _ -> ()
