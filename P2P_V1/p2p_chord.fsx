@@ -14,8 +14,9 @@ type Message =
 type PeerMessage =
     | Init of int * IActorRef[]
     | SendRequest of string
+    | ReceiveRequest of int * int * int
     | StartRequesting
-    | RequestComplete
+    | RequestComplete of int
 
 let system = ActorSystem.Create("System")
 
@@ -33,6 +34,7 @@ type ProcessController(nodes : int) =
             | RequestCompletion hops ->
                 completedNodes <- completedNodes + 1
                 numHops <- numHops + hops
+                //printfn "Complete numHops: %i" numHops
                 if(completedNodes = totalNodes) then
                     let avgHops = (float numHops) / (float totalNodes)
                     printfn "All the nodes have completed the number of requests to be made"
@@ -50,6 +52,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     let mutable nodeID = 0
     let mutable messageRequests = 0
     let mutable nodeLocation = ""
+    let mutable totalHops = 0
     let mutable ring = Array.zeroCreate(numNodes)
 
     override x.OnReceive(receivedMsg) = 
@@ -63,18 +66,33 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest nodeLocation)
             | SendRequest node ->
-                if(messageRequests = requests) then
-                    processController <! RequestCompletion 5
-                    //Also send ExitCircle message to all the nodes in routing table
-                else 
-                    //Send a request for a random peer over here
+                //Send a request for a random peer over here
+                let randomPeer = Random().Next(totalPeers)
+                let randomPeer2 = Random().Next(totalPeers)
+                //let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
+                let nodePeer = ring.[randomPeer]
+                nodePeer <! ReceiveRequest (nodeID, randomPeer2, 0) 
+                //printfn "Send Node: %s: %i" nodeLocation messageRequests
+                //request for random peer to be sent here
+                ()
+            | ReceiveRequest (originalNode, desiredID, hops) ->
+                let numHops = hops + 1
+                if(desiredID = nodeID) then
+                    ring.[originalNode] <! RequestComplete numHops
+                else
+                    //printfn "Receive Node: %s: %i" nodeLocation numHops
                     let randomPeer = Random().Next(totalPeers)
                     //let nodePeer = select ("akka://system/user/Peer" + string randomPeer) system
                     let nodePeer = ring.[randomPeer]
-                    nodePeer <! SendRequest node
-                    messageRequests <- messageRequests + 1
-                    printfn "node: %s: %i" nodeLocation messageRequests
-                    //request for random peer to be sent here
+                    nodePeer <! ReceiveRequest (nodeID, desiredID, numHops) 
+                ()
+            | RequestComplete hops ->
+                messageRequests <- messageRequests + 1
+                totalHops <- totalHops + hops
+                if(messageRequests = requests) then
+                    processController <! RequestCompletion totalHops
+                else
+                    Actor.Context.Self <! SendRequest nodeLocation
                 ()
             | _ -> ()
     
