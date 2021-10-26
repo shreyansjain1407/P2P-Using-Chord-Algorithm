@@ -46,8 +46,6 @@ type ProcessController(nodes : int) =
 
 
 
-
-
 type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     let totalRequests = requests
@@ -94,8 +92,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 totalHops <- totalHops + hops
                 if(messageRequests >= requests) then
                     processController <! RequestCompletion totalHops
-                else
-                    Actor.Context.Self <! SendRequest nodeLocation
                 ()
             | _ -> ()
     
@@ -126,6 +122,5 @@ let randomPeer = Random().Next(numNodes)
 let nodePeer = "akka://system/user/Peer" + string randomPeer
 for i in [0 .. numNodes-1] do
      ring.[i] <! StartRequesting
-     //ring.[i] <! SendRequest nodePeer
 
 Console.ReadLine()
