@@ -15,6 +15,8 @@ type Message =
     | SendRequest
     | ExitCircle of IActorRef // This can also essentiially have just the id to the current node
     | StartRequesting //This message will start the scheduler which will then start sending request messages
+    | RequestFwd of int*IActorRef
+    | Request of IActorRef
     | B of int
     | C of int
 
@@ -42,8 +44,8 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     inherit Actor()
     //Define required variables here
     let totalPeers = numNodes
-    //HashTable to be defined here
-    let fingerTable = Map.empty
+    //HashTable of the type <Int, Peer>
+    let mutable fingerTable = Map.empty<int, Peer>
 
     //Counter to keep track of message requests sent by the given peer
     let mutable messageRequests = 0
@@ -51,7 +53,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with
             | A int ->
-                ()
+                printfn "Just some random function"
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
@@ -60,12 +62,16 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 if(messageRequests = requests) then
                     processController <! RequestCompletion
                     //Also send ExitCircle message to all the nodes in routing table
-                else 
-                    //Send a request for a random peer over here
-                    let randomPeer = Random().Next(totalPeers)
-                    messageRequests <- messageRequests + 1
-                    //request for random peer to be sent here
-                ()
+                
+                //Send a request for a random peer over here
+                let randomPeer = Random().Next(totalPeers)
+                messageRequests <- messageRequests + 1
+                // match fingerTable.TryFind(randomPeer) with
+                //     | some -> some <! Request(Actor.Context.Self)
+                if fingerTable.ContainsKey(randomPeer) then
+                    let xyz = fingerTable.[randomPeer]
+                    xyz <! Request(Actor.Context.Self)
+                //request for random peer to be sent here
             | _ -> ()
 
 //Actual Working starts here
@@ -89,3 +95,5 @@ for i in [9 .. numNodes] do
 
 for i in [9 .. numNodes] do
     ring.[i] <! StartRequesting
+
+Console.ReadLine()
