@@ -64,6 +64,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 actor <! Receipt
 
             | RequestFwd (reqID, requestingPeer, hops) ->
+                // Hey Marcus check these for resources
+                // https://fsharp.github.io/fsharp-core-docs/reference/fsharp-collections-fsharpmap-2.html
+                // https://stackoverflow.com/questions/67128805/what-is-the-best-way-to-enhance-map-in-f-such-that-it-reports-the-key-when-rais
                 match fingerTable.TryFind(reqID) with
                     | Some actor ->
                         actor <! Request(requestingPeer, 1)
