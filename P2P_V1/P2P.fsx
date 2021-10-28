@@ -20,6 +20,7 @@ type Message =
     | RequestFwd of int*IActorRef*int
     | Request of IActorRef*int
     | SetFingerTable of Map<int,IActorRef>
+    | SetRequests of int
     | Receipt
 
 let system = ActorSystem.Create("System")
@@ -31,6 +32,7 @@ type ProcessController(nodes: int) =
     let totalNodes = nodes
     let mutable completedNodes = 0
     let mutable totalHops = 0
+    let mutable requests = 0
 
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with 
@@ -41,8 +43,10 @@ type ProcessController(nodes: int) =
                 completedNodes <- completedNodes + 1
                 totalHops <-totalHops + x
                 if(completedNodes = totalNodes) then
-                    printfn "All the nodes have completed the number of requests to be made"
+                    printfn "All the nodes have completed the number of requests to be made with %.1f average hops" (float(totalHops)/(float)(requests*totalNodes))
                     Environment.Exit(-1)
+            | SetRequests requests' ->
+                requests <- requests'
             | _ -> ()
 
 type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: int) =
@@ -55,7 +59,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
     let mutable totalHops = 0
 
     //Counter to keep track of message requests sent by the given peer
-    let mutable messageRequests = 0
+    let mutable messageReceipts = 0
 
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with
@@ -73,40 +77,43 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         actor <! Request(requestingPeer, hops + 1)
                         // printfn " "
                     | None ->
-                        let mutable closest = 0
-                        for entry in fingerTable do
-                            if entry.Key < reqID && entry.Key > closest then
-                                closest <- entry.Key
+                        let mutable closest = -1
+                        fingerTable |> Map.iter (fun _key _value -> if (_key < reqID || _key > closest) then closest <- _key)
+                        // for entry in fingerTable do
+                        //     if entry.Key < reqID && entry.Key > closest then
+                        //         closest <- entry.Key
                         fingerTable.[closest] <! RequestFwd(reqID, requestingPeer, hops + 1)
 
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
-            | SendRequest ->
-                if(messageRequests = requests) then
-                    cancelRequesting <- true
-                    processController <! RequestCompletion(totalHops)
                 
+            | SendRequest ->
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-                messageRequests <- messageRequests + 1
                 // printfn "XXXXXXXXX %i" randomPeer
                 
                 match fingerTable.TryFind(randomPeer) with
                     | Some actor ->
                         actor <! Request(Actor.Context.Self, 1)
                     | None ->
-                        let mutable closest = 0
-                        for entry in fingerTable do
-                            if entry.Key < randomPeer && entry.Key > closest then
-                                closest <- entry.Key
-                        printfn "Closest Element where the error occurs ideally:  XXXXXX  %i  XXXXXX" closest
+                        let mutable closest = -1
+                        fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
+                        // for entry in fingerTable do
+                        //     if entry.Key < randomPeer && entry.Key > closest then
+                        //         closest <- entry.Key
+                        // printfn "Closest Element where the error occurs ideally:  XXXXXX  %i  XXXXXX" closest
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
 
             | SetFingerTable x ->
                 fingerTable <- x
 
             | Receipt ->
+                messageReceipts <- messageReceipts + 1
+                if(messageReceipts = requests) then
+                        cancelRequesting <- true
+                        processController <! RequestCompletion(totalHops)
+                
                 printfn "Message Received at designated peer"
 
             | _ -> ()
@@ -138,7 +145,7 @@ printfn "Nearest Power: %i, Ring Capacity: %i" nearestPow ringCapacity
 //_______________________________________________________________________________
 
 processController <! SetTotalNodes(numNodes) //Initializing the total number of nodes in the entire system
-
+processController <! SetRequests(numRequests)
 //Initializing the entire ring as an array for now, until further progress
 
 let ring = Array.zeroCreate(numNodes)
