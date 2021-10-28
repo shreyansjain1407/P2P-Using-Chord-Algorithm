@@ -1,3 +1,5 @@
+open System.Reflection
+
 #time "on"
 #r "nuget: Akka.FSharp"
 #r "nuget: Akka.TestKit"
@@ -13,7 +15,7 @@ type Message =
     // | PeerRing of IActorRef[]
     | RequestCompletion of int
     | SendRequest
-    | ExitCircle of IActorRef // This can also essentiially have just the id to the current node
+    | ExitCircle of IActorRef // This can also essentially have just the id to the current node
     | StartRequesting //This message will start the scheduler which will then start sending request messages
     | RequestFwd of int*IActorRef*int
     | Request of IActorRef*int
@@ -72,6 +74,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         actor <! Request(requestingPeer, 1)
                         // printfn " "
                     | None ->
+//                        printfn "The key we are looking for is %i" reqID
                         let mutable closest = -1;
                         for entry in fingerTable do
                             if entry.Key < reqID && entry.Key > closest then
@@ -89,9 +92,10 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-                printfn "Send Message received, Message Index %i" messageRequests
+//                printfn "Send Message received, Message Index %i" messageRequests
                 messageRequests <- messageRequests + 1
-                
+                printfn "XXXXXXXXX %i" randomPeer
+                 
                 match fingerTable.TryFind(randomPeer) with
                     | Some actor ->
                         actor <! Request(Actor.Context.Self, 1)
