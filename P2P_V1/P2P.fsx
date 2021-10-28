@@ -54,7 +54,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
     let mutable fingerTable = Map.empty<int, IActorRef>
     let mutable totalHops = 0
 
-
     //Counter to keep track of message requests sent by the given peer
     let mutable messageRequests = 0
 
@@ -71,20 +70,18 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 // https://stackoverflow.com/questions/67128805/what-is-the-best-way-to-enhance-map-in-f-such-that-it-reports-the-key-when-rais
                 match fingerTable.TryFind(reqID) with
                     | Some actor ->
-                        actor <! Request(requestingPeer, 1)
+                        actor <! Request(requestingPeer, hops + 1)
                         // printfn " "
                     | None ->
-//                        printfn "The key we are looking for is %i" reqID
-                        let mutable closest = -1;
+                        let mutable closest = 0
                         for entry in fingerTable do
                             if entry.Key < reqID && entry.Key > closest then
                                 closest <- entry.Key
-                        fingerTable.[closest] <! RequestFwd(reqID, requestingPeer, 1)
+                        fingerTable.[closest] <! RequestFwd(reqID, requestingPeer, hops + 1)
 
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
-                
             | SendRequest ->
                 if(messageRequests = requests) then
                     cancelRequesting <- true
@@ -92,18 +89,18 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-//                printfn "Send Message received, Message Index %i" messageRequests
                 messageRequests <- messageRequests + 1
-                printfn "XXXXXXXXX %i" randomPeer
-                 
+                // printfn "XXXXXXXXX %i" randomPeer
+                
                 match fingerTable.TryFind(randomPeer) with
                     | Some actor ->
                         actor <! Request(Actor.Context.Self, 1)
                     | None ->
-                        let mutable closest = 0;
+                        let mutable closest = 0
                         for entry in fingerTable do
                             if entry.Key < randomPeer && entry.Key > closest then
                                 closest <- entry.Key
+                        printfn "Closest Element where the error occurs ideally:  XXXXXX  %i  XXXXXX" closest
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
 
             | SetFingerTable x ->
