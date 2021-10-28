@@ -13,9 +13,9 @@ type Message =
 
 type PeerMessage =
     | Init of int * IActorRef[]
-    | InitFingerTable of Map<int, int>
+    | InitFingerTable of Map<int, IActorRef>
     | SendRequest of string
-    | ReceiveRequest of int * int * int
+    | ReceiveRequest of IActorRef * int * int
     | StartRequesting
     | RequestComplete of int
 
@@ -56,7 +56,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     let mutable nodeLocation = ""
     let mutable totalHops = 0
     let mutable ring = Array.zeroCreate(numNodes)
-    let mutable fingerTable = Map.empty<int, int>
+    let mutable fingerTable = Map.empty<int, IActorRef>
 
     override x.OnReceive(receivedMsg) = 
         match receivedMsg :?> PeerMessage with
@@ -75,28 +75,30 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
                 let randomPeer = Random().Next(totalPeers)
 
                 match fingerTable.TryFind(randomPeer) with
-                | Some value ->
-                    ring.[value] <! RequestComplete 0
+                | Some peer ->
+                   peer <! RequestComplete 0
                 | None ->
-                    let mutable closest = 0;
-                    for entry in fingerTable do
+                    let mutable closest = -1;
+                    fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
+                   (*for entry in fingerTable do
                         if entry.Key < randomPeer && entry.Key > closest then
-                            closest <- entry.Key
-                    ring.[closest] <! ReceiveRequest (nodeID, randomPeer, 0)
+                            closest <- entry.Key*)
+                    fingerTable.[closest] <! ReceiveRequest (Actor.Context.Self, randomPeer, 0)
                 //printfn "Send Node: %s: %i" nodeLocation messageRequests
                 ()
             | ReceiveRequest (originalNode, desiredID, hops) ->
                 let numHops = hops + 1
-
                 match fingerTable.TryFind(desiredID) with
-                | Some value ->
-                    ring.[value] <! RequestComplete numHops
+                | Some peer ->
+                    peer <! RequestComplete numHops
                 | None ->
-                    let mutable closest = 0;
-                    for entry in fingerTable do
+                    let mutable closest = -1;
+                    fingerTable |> Map.iter (fun _key _value -> if (_key < desiredID || _key > closest) then closest <- _key)
+                    
+                    (*for entry in fingerTable do
                         if entry.Key < desiredID && entry.Key > closest then
-                            closest <- entry.Key
-                    ring.[closest] <! ReceiveRequest (originalNode, desiredID, 0)
+                            closest <- entry.Key*)
+                    fingerTable.[closest] <! ReceiveRequest (originalNode, desiredID, numHops)
                 ()
             | RequestComplete hops ->
                 messageRequests <- messageRequests + 1
@@ -109,8 +111,8 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
 
 
 //Actual Working starts here
-let numNodes = 15//int (string (fsi.CommandLineArgs.GetValue 1))
-let numRequests = 6//int (string (fsi.CommandLineArgs.GetValue 2))
+let mutable numNodes = int (string (fsi.CommandLineArgs.GetValue 1))
+let numRequests = int (string (fsi.CommandLineArgs.GetValue 2))
 
 let processController = system.ActorOf(Props.Create(typeof<ProcessController>, numNodes),"processController")
 
@@ -136,6 +138,7 @@ let nearestPower n=
 
 let nearestPow = nearestPower numNodes
 let ringCapacity = (int)(2. ** (float)nearestPow)
+numNodes <- ringCapacity
 
 let ring = Array.zeroCreate(numNodes)
 
@@ -150,10 +153,10 @@ let randomPeer = Random().Next(numNodes)
 
 //Initialize finger table for each peer
 for i in [0 .. numNodes-1] do
-    let mutable fingers = Map.empty<int, int> 
+    let mutable fingers = Map.empty<int, IActorRef> 
     for j in [0 .. nearestPow - 1] do
         let x = (i + (int)(2. ** (float)j)) % (int)(2.** (float)nearestPow)
-        fingers <- fingers |> Map.add x j
+        fingers <- fingers |> Map.add x ring.[j]
     ring.[i] <! InitFingerTable fingers
 
 //Start requesting info for a random peer for each peer
