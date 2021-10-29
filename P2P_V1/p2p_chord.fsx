@@ -1,23 +1,25 @@
 ﻿#time "on"
 #r "nuget: Akka.FSharp"
 #r "nuget: Akka.TestKit"
+#load "RandomString.fsx"
 
 open System
 open Akka.Actor
 open Akka.FSharp
 open Akka.Configuration
+open RandomString
 
 type Message = 
     | SetTotalNodes of int
     | RequestCompletion of int
 
 type PeerMessage =
-    | Init of int * IActorRef[]
+    | Init of int * string * string[] * Map<IActorRef, string>
     | InitFingerTable of Map<int, IActorRef>
-    | SendRequest of string
-    | ReceiveRequest of IActorRef * int * int
+    | SendRequest
+    | ReceiveRequest of IActorRef * int * int * string
     | StartRequesting
-    | RequestComplete of int
+    | RequestComplete of int    
 
 let system = ActorSystem.Create("System")
 
@@ -53,56 +55,68 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
     let totalPeers = numNodes
     let mutable nodeID = 0
     let mutable messageRequests = 0
+    let mutable message = ""
+    let mutable allMessages = Array.zeroCreate(numNodes)
+    let mutable messageTable = Map.empty<IActorRef, string>
     let mutable nodeLocation = ""
     let mutable totalHops = 0
-    let mutable ring = Array.zeroCreate(numNodes)
     let mutable fingerTable = Map.empty<int, IActorRef>
 
     override x.OnReceive(receivedMsg) = 
         match receivedMsg :?> PeerMessage with
-            | Init (id, peers) ->
+            | Init (id, msg, messages, messageMap) ->
                 nodeID <- id
                 nodeLocation <- "akka://system/user/Peer" + string nodeID
-                ring <- peers
+                message <- msg
+                allMessages <- messages
+                messageTable <- messageMap
                 ()
             | InitFingerTable fingers ->
                 fingerTable <- fingers
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
-                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest nodeLocation)
-            | SendRequest node ->
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
+            | SendRequest ->
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-
+                let desiredMsg = allMessages.[randomPeer]
                 match fingerTable.TryFind(randomPeer) with
                 | Some peer ->
-                   peer <! RequestComplete 0
+                   let peerMsg = messageTable.[peer]
+                   //printfn "desired: %s query: %s" desiredMsg peerMsg
+                   if(peerMsg = desiredMsg) then
+                       peer <! RequestComplete 0
+                   else
+                       let mutable closest = -1;
+                       fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
+                       fingerTable.[closest] <! ReceiveRequest (Actor.Context.Self, randomPeer, 0, desiredMsg)  
                 | None ->
                     let mutable closest = -1;
                     fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
-                   (*for entry in fingerTable do
-                        if entry.Key < randomPeer && entry.Key > closest then
-                            closest <- entry.Key*)
-                    fingerTable.[closest] <! ReceiveRequest (Actor.Context.Self, randomPeer, 0)
+                    fingerTable.[closest] <! ReceiveRequest (Actor.Context.Self, randomPeer, 0, desiredMsg)
                 //printfn "Send Node: %s: %i" nodeLocation messageRequests
                 ()
-            | ReceiveRequest (originalNode, desiredID, hops) ->
+            | ReceiveRequest (originalNode, desiredID, hops, desiredMsg) ->
                 let numHops = hops + 1
                 match fingerTable.TryFind(desiredID) with
                 | Some peer ->
-                    peer <! RequestComplete numHops
+                    let peerMsg = messageTable.[peer]
+                    printfn "desired: %s query: %s" desiredMsg peerMsg
+                    if(peerMsg.Equals(desiredMsg)) then
+                        peer <! RequestComplete numHops
+                    else
+                        let mutable closest = -1;
+                        fingerTable |> Map.iter (fun _key _value -> if (_key < desiredID || _key > closest) then closest <- _key)
+                        fingerTable.[closest] <! ReceiveRequest (originalNode, desiredID, numHops, desiredMsg)
                 | None ->
                     let mutable closest = -1;
                     fingerTable |> Map.iter (fun _key _value -> if (_key < desiredID || _key > closest) then closest <- _key)
-                    
-                    (*for entry in fingerTable do
-                        if entry.Key < desiredID && entry.Key > closest then
-                            closest <- entry.Key*)
-                    fingerTable.[closest] <! ReceiveRequest (originalNode, desiredID, numHops)
+                    fingerTable.[closest] <! ReceiveRequest (originalNode, desiredID, numHops, desiredMsg)
                 ()
             | RequestComplete hops ->
                 messageRequests <- messageRequests + 1
                 totalHops <- totalHops + hops
+                printfn "%i" totalHops
                 if(messageRequests >= requests) then
                     processController <! RequestCompletion totalHops
                 ()
@@ -111,8 +125,8 @@ type Peer(processController: IActorRef, requests: int, numNodes: int) =
 
 
 //Actual Working starts here
-let mutable numNodes = int (string (fsi.CommandLineArgs.GetValue 1))
-let numRequests = int (string (fsi.CommandLineArgs.GetValue 2))
+let mutable numNodes = 2//int (string (fsi.CommandLineArgs.GetValue 1))
+let numRequests = 4//int (string (fsi.CommandLineArgs.GetValue 2))
 
 let processController = system.ActorOf(Props.Create(typeof<ProcessController>, numNodes),"processController")
 
@@ -146,9 +160,20 @@ let ring = Array.zeroCreate(numNodes)
 for i in [0 .. numNodes-1] do
     ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes), "Peer" + string i)
 
+//Create String messages
+let messages = Array.zeroCreate(numNodes)
+
+for i in [0 .. numNodes-1] do
+    messages.[i] <- randomStr (i+1)
+    printfn "msga: %s" messages.[i]
+
+let mutable peerMessages = Map.empty<IActorRef, string>
+for i in [0 .. numNodes-1] do
+    peerMessages <- peerMessages |> Map.add ring.[i] messages.[i]
+
 //Initialize Peers
 for i in [0 .. numNodes-1] do
-    ring.[i] <! Init(i, ring)
+    ring.[i] <! Init(i, messages.[i], messages, peerMessages)
 let randomPeer = Random().Next(numNodes)
 
 //Initialize finger table for each peer
