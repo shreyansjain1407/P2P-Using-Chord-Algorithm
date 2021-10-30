@@ -61,10 +61,13 @@ let replace (key: int) (curValue: int) (peerID: int) (currentPeer: int) =
     
     let mutable closest = (int)(2. ** (Math.Log2((float)distance)/Math.Log2(2.)))
     closest <- (closest + currentPeer) % 4
-    if fingerPeerID.[closest] < peerID then
-        false
-    else
-        true
+    match fingerPeerID.TryFind(closest) with
+        | Some x ->
+            if x = -1 then
+                true
+            else
+                not(fingerPeerID.[closest] < peerID)
+        | None -> true //This condition will, for the most part, never be accessed
         
 let mutable i = 1
 let peerID = 5

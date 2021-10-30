@@ -1,5 +1,3 @@
-open System.Reflection
-
 #time "on"
 #r "nuget: Akka.FSharp"
 #r "nuget: Akka.TestKit"
@@ -7,11 +5,11 @@ open System.Reflection
 open System
 open Akka.Actor
 open Akka.FSharp
-open Akka.Configuration
+//open Akka.Configuration
+//open System.Reflection
 
 type Message =
     | A of int
-    | SetTotalNodes of int
     // | PeerRing of IActorRef[]
     | RequestCompletion of int
     | SendRequest
@@ -19,11 +17,11 @@ type Message =
     | StartRequesting //This message will start the scheduler which will then start sending request messages
     | RequestFwd of int*IActorRef*int
     | Request of IActorRef*int
-    | SetFingerTable of Map<int,IActorRef>
+    | SetFingerTable of Map<int,IActorRef>*Map<int,int>
     | SetRequests of int
     | Receipt
     | Join of int*IActorRef
-    | JoinResponse of Map<int, IActorRef>
+    | JoinResponse of Map<int, IActorRef>*Map<int,int>
 
 let system = ActorSystem.Create("System")
 
@@ -38,14 +36,11 @@ type ProcessController(nodes: int) =
 
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with 
-            | SetTotalNodes nodes ->
-                // totalNodes <- nodes
-                printfn "This is just an initialization might not even be needed"
             | RequestCompletion x ->
                 completedNodes <- completedNodes + 1
                 totalHops <-totalHops + x
                 if(completedNodes = totalNodes) then
-                    printfn "All the nodes have completed the number of requests to be made with %.1f average hops" (float(totalHops)/(float)(requests*totalNodes))
+                    printfn $"All the nodes have completed the number of requests to be made with {(float(totalHops)/float(requests*totalNodes))} average hops"
                     Environment.Exit(-1)
             | SetRequests requests' ->
                 requests <- requests'
@@ -62,6 +57,23 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
     let mutable totalHops = 0
     //Counter to keep track of message requests sent by the given peer
     let mutable messageReceipts = 0
+    
+    let replace (peerID: int) (currentPeerID: int) =
+        let mutable distance = 0
+        if(currentPeerID < peerID) then
+            distance <- peerID - currentPeerID
+        else
+            distance <- currentPeerID + int(2. ** 4.) - peerID
+        
+        let mutable closest = int(2. ** (Math.Log2(float distance)/Math.Log2(2.)))
+        closest <- (closest + currentPeerID) % N
+        match fingerPeerID.TryFind(closest) with
+            | Some x ->
+                if x = -1 then
+                    true
+                else
+                    not(fingerPeerID.[closest] < peerID)
+            | None -> true //This condition will, for the most part, never be accessed
 
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with
@@ -74,7 +86,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 match fingerTable.TryFind(reqID) with
                     | Some actor ->
                         actor <! Request(requestingPeer, hops + 1)
-                        // printfn " "
+
                     | None ->
                         let mutable closest = -1
                         fingerTable |> Map.iter (fun _key _value -> if (_key < reqID || _key > closest) then closest <- _key)
@@ -96,8 +108,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
 
-            | SetFingerTable x ->
+            | SetFingerTable (x, y)->
                 fingerTable <- x
+                fingerPeerID <- y
 
             | Receipt ->
                 messageReceipts <- messageReceipts + 1
@@ -107,15 +120,18 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
                 printfn "Message Received at designated peer"
             | Join (peerID, peer) ->
-                if fingerTable.IsEmpty then
-                    //If the table is empty first connection then just add the peer and send back the table
-                    fingerTable <- fingerTable |> Map.add peerID peer
-                    peer <! JoinResponse(fingerTable)
-                else
-                    // If the table is not empty then check if the peerID fits the requirement of addition at a spot and change it and send back the fingertable
-                    fingerTable <- fingerTable |> Map.add peerID peer
-            
-            | JoinResponse fingerTable ->
+                // According to new code, the table will never be entirely empty, It will have null values or -1s
+                fingerTable |> Map.iter (fun _key _value ->
+                    if replace peerID PeerID then
+                        fingerTable <- fingerTable |> Map.add _key peer
+                        fingerPeerID <- fingerPeerID |> Map.add _key peerID
+                        printfn "Printing from if"
+                        //May implement else block if in case needed
+                    )
+                fingerTable <- fingerTable |> Map.add peerID peer
+                peer <! JoinResponse(fingerTable, fingerPeerID)
+                
+            | JoinResponse (x, y) ->
                 printfn ""
                 
             | _ -> ()
@@ -140,13 +156,12 @@ let nearestPower n=
         count
 
 let nearestPow = nearestPower numNodes
-let ringCapacity = (int)(2. ** (float)nearestPow)
+let ringCapacity = int (2.**float nearestPow)
 numNodes <- ringCapacity
 
-printfn "Nearest Power: %i, Ring Capacity: %i" nearestPow ringCapacity
+printfn $"Nearest Power: {nearestPow}, Ring Capacity: {ringCapacity}"
 //_______________________________________________________________________________
 
-processController <! SetTotalNodes(numNodes) //Initializing the total number of nodes in the entire system
 processController <! SetRequests(numRequests)
 //Initializing the entire ring as an array for now, until further progress
 
@@ -157,11 +172,13 @@ for i in [0 .. numNodes-1] do
 
 //Temporary FingerTable Initialization
 for i in [0 .. numNodes-1] do
-    let mutable fingers = Map.empty<int, IActorRef> 
+    let mutable fingers = Map.empty<int, IActorRef>
+    let mutable peerIDTable = Map.empty<int, int>
     for j in [0 .. nearestPow - 1] do
-        let x = (i + (int)(2. ** (float)j)) % (int)(2.** (float)nearestPow)
-        fingers <- fingers |> Map.add x ring.[x]
-    ring.[i] <! SetFingerTable(fingers)
+        let x = i + int (2. ** float j) % int (2.** float nearestPow)
+        fingers <- fingers |> Map.add x null
+        peerIDTable <- peerIDTable |> Map.add x -1
+    ring.[i] <! SetFingerTable(fingers, peerIDTable)
 
 for i in [0 .. numNodes-1] do
     ring.[i] <! StartRequesting
