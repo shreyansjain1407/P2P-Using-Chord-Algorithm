@@ -22,6 +22,8 @@ type Message =
     | SetFingerTable of Map<int,IActorRef>
     | SetRequests of int
     | Receipt
+    | Join of int*IActorRef
+    | JoinResponse of Map<int, IActorRef>
 
 let system = ActorSystem.Create("System")
 
@@ -49,15 +51,15 @@ type ProcessController(nodes: int) =
                 requests <- requests'
             | _ -> ()
 
-type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: int) =
+type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: int, N: int) =
     inherit Actor()
     //Define required variables here
     let totalPeers = numNodes
     let mutable cancelRequesting = false
     //HashTable of the type <Int, Peer>
     let mutable fingerTable = Map.empty<int, IActorRef>
+    let mutable fingerPeerID = Map.empty<int, int>
     let mutable totalHops = 0
-
     //Counter to keep track of message requests sent by the given peer
     let mutable messageReceipts = 0
 
@@ -69,9 +71,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 actor <! Receipt
 
             | RequestFwd (reqID, requestingPeer, hops) ->
-                // Hey Marcus check these for resources
-                // https://fsharp.github.io/fsharp-core-docs/reference/fsharp-collections-fsharpmap-2.html
-                // https://stackoverflow.com/questions/67128805/what-is-the-best-way-to-enhance-map-in-f-such-that-it-reports-the-key-when-rais
                 match fingerTable.TryFind(reqID) with
                     | Some actor ->
                         actor <! Request(requestingPeer, hops + 1)
@@ -79,9 +78,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                     | None ->
                         let mutable closest = -1
                         fingerTable |> Map.iter (fun _key _value -> if (_key < reqID || _key > closest) then closest <- _key)
-                        // for entry in fingerTable do
-                        //     if entry.Key < reqID && entry.Key > closest then
-                        //         closest <- entry.Key
                         fingerTable.[closest] <! RequestFwd(reqID, requestingPeer, hops + 1)
 
             | StartRequesting ->
@@ -91,7 +87,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | SendRequest ->
                 //Send a request for a random peer over here
                 let randomPeer = Random().Next(totalPeers)
-                // printfn "XXXXXXXXX %i" randomPeer
                 
                 match fingerTable.TryFind(randomPeer) with
                     | Some actor ->
@@ -99,10 +94,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                     | None ->
                         let mutable closest = -1
                         fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
-                        // for entry in fingerTable do
-                        //     if entry.Key < randomPeer && entry.Key > closest then
-                        //         closest <- entry.Key
-                        // printfn "Closest Element where the error occurs ideally:  XXXXXX  %i  XXXXXX" closest
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
 
             | SetFingerTable x ->
@@ -115,7 +106,18 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         processController <! RequestCompletion(totalHops)
                 
                 printfn "Message Received at designated peer"
-
+            | Join (peerID, peer) ->
+                if fingerTable.IsEmpty then
+                    //If the table is empty first connection then just add the peer and send back the table
+                    fingerTable <- fingerTable |> Map.add peerID peer
+                    peer <! JoinResponse(fingerTable)
+                else
+                    // If the table is not empty then check if the peerID fits the requirement of addition at a spot and change it and send back the fingertable
+                    fingerTable <- fingerTable |> Map.add peerID peer
+            
+            | JoinResponse fingerTable ->
+                printfn ""
+                
             | _ -> ()
 
 //Actual Working starts here
@@ -151,7 +153,7 @@ processController <! SetRequests(numRequests)
 let ring = Array.zeroCreate(numNodes)
 
 for i in [0 .. numNodes-1] do
-    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes, i), "Peer" + string i)
+    ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes, i, nearestPow), "Peer" + string i)
 
 //Temporary FingerTable Initialization
 for i in [0 .. numNodes-1] do

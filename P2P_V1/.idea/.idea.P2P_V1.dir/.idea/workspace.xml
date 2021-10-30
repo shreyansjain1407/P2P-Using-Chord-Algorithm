@@ -23,8 +23,9 @@
     <property name="RunOnceActivity.OpenProjectViewOnStart" value="true" />
     <property name="RunOnceActivity.ShowReadmeOnStart" value="true" />
     <property name="WebServerToolWindowFactoryState" value="false" />
+    <property name="com.intellij.ide.scratch.ScratchImplUtil$2/New Scratch File" value="F# Script" />
     <property name="nodejs_package_manager_path" value="npm" />
-    <property name="settings.editor.selected.configurable" value="preferences.pluginManager" />
+    <property name="settings.editor.selected.configurable" value="Errors" />
     <property name="vue.rearranger.settings.migration" value="true" />
   </component>
   <component name="RunManager">
@@ -58,6 +59,7 @@
       <workItem from="1635380467287" duration="2068000" />
       <workItem from="1635426493331" duration="180000" />
       <workItem from="1635426689481" duration="4236000" />
+      <workItem from="1635625559995" duration="5986000" />
     </task>
     <servers />
   </component>
