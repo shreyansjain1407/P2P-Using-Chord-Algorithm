@@ -128,6 +128,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
             | SendRequest ->
                 //Send a request for a random peer over here
+                if messageReceipts >= requests then
+                    ()
+                    
                 let randomPeer = Random().Next(totalPeers)
                 
                 match fingerTable.TryFind(randomPeer) with
@@ -142,7 +145,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         let mutable closest = -1
                         fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) && _value<>null then closest <- _key)
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
-
+                    
             | SetFingerTable (x, y)->
                 fingerTable <- x
                 fingerPeerID <- y
@@ -156,12 +159,10 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
             | Join (peerID, peer) ->
                 printfn $"Peer {peerID} has joined the ring"
-                // According to new code, the table will never be entirely empty, It will have null values or -1s
                 fingerTable |> Map.iter (fun _key _value ->
                     if (replace _key peerID PeerID && _key <> PeerID) || _key = peerID then
                         fingerTable <- fingerTable |> Map.add _key peer
                         fingerPeerID <- fingerPeerID |> Map.add _key peerID
-                        //May implement else block if in case needed
                 )
                 fingerTable |> Map.iter (fun x y ->
                     if x <> PeerID && y <> null then
@@ -170,7 +171,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
             | UpdateFingerTable (fingers, fingerPeers) ->
                 //Function that takes an incoming PeerTable and matches it with the current peer table and updates values
-//                printfn $"Peer {PeerID} is updating its fingerTable"
                 let mutable updateSuccessorRequest = false
                 
                 //This needs to be updated and replace function needs to be implemented here for updation
@@ -180,17 +180,12 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                             int (2. ** float N)
                         else
                             value'
-                            
                     let mutable leastKey = int (2. ** float N)
                     //Implement something using distance function here
                     fingerPeers |> Map.iter (fun _key _value ->
                         if _value <> -1 && checkDistance key'  value' _value then
                             lowestValue <- _value
                             leastKey <- _key
-                        
-//                        if _value < lowestValue && _value >= key' && _value<>PeerID then
-//                            lowestValue <- _value
-//                            leastKey <- _key
                     )
                     if leastKey <> (int (2. ** float N)) && key'<>value' then
                         fingerPeerID <- fingerPeerID |> Map.add key' lowestValue
@@ -204,7 +199,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 let curActor = Actor.Context.Self //I tried to put this in the message itself but for some reason it didn't except it
                 fingerTable |> Map.iter (fun key' value' ->
                     if value' <> null && key'<>PeerID then
-//                        printfn $"Peer {PeerID} sent request to peer {fingerPeerID.[key']}"
+                        //printfn $"Peer {PeerID} sent request to peer {fingerPeerID.[key']}"
                         value' <! RequestFingerTables(curActor)
                     )
             
@@ -218,7 +213,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | _ -> ()
 
 //Actual Working starts here
-let mutable numNodes = 5//int (string (fsi.CommandLineArgs.GetValue 1))
+let mutable numNodes = 15000//int (string (fsi.CommandLineArgs.GetValue 1))
 let numRequests = 10//int (string (fsi.CommandLineArgs.GetValue 2))
 
 let processController = system.ActorOf(Props.Create(typeof<ProcessController>, numNodes),"processController")
@@ -238,7 +233,7 @@ let nearestPower n=
 
 let nearestPow = nearestPower numNodes
 let ringCapacity = int (2.**float nearestPow)
-numNodes <- ringCapacity
+//numNodes <- ringCapacity
 
 printfn $"Nearest Power: {nearestPow}, Ring Capacity: {ringCapacity}"
 //_______________________________________________________________________________
@@ -270,7 +265,7 @@ for i in [0 .. numNodes-1] do
 
 let baseActor = ring.[0]
 for i in [1 .. numNodes-1] do
-    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
+//    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
     baseActor <! Join(i, ring.[i])
 
 //Debugging Code
@@ -279,16 +274,17 @@ for i in [1 .. numNodes-1] do
 //baseActor <! PrintFinger
 System.Threading.Thread.Sleep(TimeSpan.FromSeconds(3.))
 //ring.[7] <! PrintFinger
-
+printfn "Starting table updation"
 for i in [0 .. numNodes-1] do
 //    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
     ring.[i] <! StartUpdation
     
 System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10.))
 
-for i in [0 .. numNodes-1] do
-    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.0))
-    ring.[i] <! PrintFinger
+//for i in [0 .. numNodes-1] do
+//    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.0))
+//    ring.[i] <! PrintFinger
+printfn "Commence Message Sending"
 for i in [0 .. numNodes-1] do
     ring.[i] <! StartRequesting
 
