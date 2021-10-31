@@ -66,7 +66,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
         if(currentPeerID < peerID) then
             distance <- peerID - currentPeerID
         else
-            distance <- currentPeerID + int(2. ** 4.) - peerID
+            distance <- currentPeerID + int(2. ** float N) - peerID
         
         let mutable closest = int(2. ** (Math.Log2(float distance)/Math.Log2(2.)))
         closest <- (closest + currentPeerID) % N
@@ -77,6 +77,25 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 else
                     not(fingerPeerID.[closest] < peerID)
             | None -> true //This condition will, for the most part, never be accessed
+
+    let checkDistance (currentKey: int) (curTableEntry: int) (incomingEntry: int) =
+        //Fujction to measure table entry distance
+        let currentDistance =
+            if(currentKey < curTableEntry) then
+                curTableEntry - currentKey
+            else
+                currentKey + int(2. ** float N) - curTableEntry
+        let incomingDistance =
+            if(currentKey < incomingEntry) then
+                incomingEntry - currentKey
+            else
+                currentKey + int(2. ** float N) - incomingEntry
+        if currentKey = curTableEntry then
+            false
+        elif currentKey = incomingEntry then
+            true
+        else
+            incomingDistance < currentDistance
 
     override x.OnReceive(receivedMsg) =
         match receivedMsg :?> Message with
@@ -139,7 +158,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 printfn $"Peer {peerID} has joined the ring"
                 // According to new code, the table will never be entirely empty, It will have null values or -1s
                 fingerTable |> Map.iter (fun _key _value ->
-                    if replace _key peerID PeerID && _key <> PeerID then
+                    if (replace _key peerID PeerID && _key <> PeerID) || _key = peerID then
                         fingerTable <- fingerTable |> Map.add _key peer
                         fingerPeerID <- fingerPeerID |> Map.add _key peerID
                         //May implement else block if in case needed
@@ -151,7 +170,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
             | UpdateFingerTable (fingers, fingerPeers) ->
                 //Function that takes an incoming PeerTable and matches it with the current peer table and updates values
-                printfn $"Peer {PeerID} is updating its fingerTable"
+//                printfn $"Peer {PeerID} is updating its fingerTable"
                 let mutable updateSuccessorRequest = false
                 
                 //This needs to be updated and replace function needs to be implemented here for updation
@@ -161,13 +180,19 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                             int (2. ** float N)
                         else
                             value'
-                    let mutable leastKey = int (2. ** float N)        
+                            
+                    let mutable leastKey = int (2. ** float N)
+                    //Implement something using distance function here
                     fingerPeers |> Map.iter (fun _key _value ->
-                        if _value < lowestValue && _value >= key' && _value<>PeerID then
+                        if _value <> -1 && checkDistance key'  value' _value then
                             lowestValue <- _value
                             leastKey <- _key
+                        
+//                        if _value < lowestValue && _value >= key' && _value<>PeerID then
+//                            lowestValue <- _value
+//                            leastKey <- _key
                     )
-                    if leastKey <> (int (2. ** float N)) then
+                    if leastKey <> (int (2. ** float N)) && key'<>value' then
                         fingerPeerID <- fingerPeerID |> Map.add key' lowestValue
                         fingerTable <- fingerTable |> Map.add key' fingers.[leastKey]
                         updateSuccessorRequest <- true
@@ -179,7 +204,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 let curActor = Actor.Context.Self //I tried to put this in the message itself but for some reason it didn't except it
                 fingerTable |> Map.iter (fun key' value' ->
                     if value' <> null && key'<>PeerID then
-                        printfn $"Peer {PeerID} sent request to peer {fingerPeerID.[key']}"
+//                        printfn $"Peer {PeerID} sent request to peer {fingerPeerID.[key']}"
                         value' <! RequestFingerTables(curActor)
                     )
             
@@ -252,19 +277,19 @@ for i in [1 .. numNodes-1] do
 //baseActor <! Join (7, ring.[7])
 //System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
 //baseActor <! PrintFinger
-System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5.))
+System.Threading.Thread.Sleep(TimeSpan.FromSeconds(3.))
 //ring.[7] <! PrintFinger
 
-//for i in [0 .. numNodes-1] do
-////    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
-//    ring.[i] <! StartUpdation
+for i in [0 .. numNodes-1] do
+//    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
+    ring.[i] <! StartUpdation
     
-System.Threading.Thread.Sleep(TimeSpan.FromSeconds(3.))
+System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10.))
 
 for i in [0 .. numNodes-1] do
     System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.0))
     ring.[i] <! PrintFinger
-//for i in [0 .. numNodes-1] do
-//    ring.[i] <! StartRequesting
+for i in [0 .. numNodes-1] do
+    ring.[i] <! StartRequesting
 
 Console.ReadLine()
