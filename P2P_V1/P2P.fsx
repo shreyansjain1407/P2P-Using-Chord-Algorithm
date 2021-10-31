@@ -21,7 +21,9 @@ type Message =
     | SetRequests of int
     | Receipt
     | Join of int*IActorRef
-    | JoinResponse of Map<int, IActorRef>*Map<int,int>
+    | UpdateFingerTable of Map<int, IActorRef>*Map<int,int>
+    | UpdateSuccessors
+    | RequestFingerTables of IActorRef
 
 let system = ActorSystem.Create("System")
 
@@ -117,22 +119,53 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 if(messageReceipts = requests) then
                         cancelRequesting <- true
                         processController <! RequestCompletion(totalHops)
-                
                 printfn "Message Received at designated peer"
+                
             | Join (peerID, peer) ->
+                printfn $"Peer {peerID} has joined the ring"
                 // According to new code, the table will never be entirely empty, It will have null values or -1s
                 fingerTable |> Map.iter (fun _key _value ->
                     if replace peerID PeerID then
                         fingerTable <- fingerTable |> Map.add _key peer
                         fingerPeerID <- fingerPeerID |> Map.add _key peerID
-                        printfn "Printing from if"
                         //May implement else block if in case needed
-                    )
+                )
                 fingerTable <- fingerTable |> Map.add peerID peer
-                peer <! JoinResponse(fingerTable, fingerPeerID)
+                peer <! UpdateFingerTable(fingerTable, fingerPeerID)
                 
-            | JoinResponse (x, y) ->
-                printfn ""
+            | UpdateFingerTable (x, y) ->
+                //Function that takes an incoming PeerTable and matches it with the current peer table and updates values
+                printfn $"Peer {PeerID} is updating its fingerTable"
+                let mutable updateSuccessorRequest = false
+                fingerPeerID |> Map.iter (fun key' value' ->
+                    let mutable lowestValue =
+                        if value' = -1 then
+                            int (2. ** float N)
+                        else
+                            value'
+                    let mutable leastKey = int (2. ** float N)        
+                    y |> Map.iter (fun _key _value ->
+                        if _value < lowestValue && _value >= key' then
+                            lowestValue <- _value
+                            leastKey <- _key
+                    )
+                    if leastKey <> (int (2. ** float N)) then
+                        fingerPeerID <- fingerPeerID |> Map.add key' lowestValue
+                        fingerTable <- fingerTable |> Map.add key' x.[leastKey]
+                        updateSuccessorRequest <- true
+                )
+                if updateSuccessorRequest then
+                    Actor.Context.Self <! UpdateSuccessors
+            
+            | UpdateSuccessors ->
+                let curActor = Actor.Context.Self //I tried to put this in the message itself but for some reason it didn't except it
+                fingerTable |> Map.iter (fun key' value' ->
+                    if value' <> null then
+                        value' <! RequestFingerTables(curActor)
+                    )
+            
+            | RequestFingerTables x ->
+                x <! UpdateFingerTable(fingerTable, fingerPeerID)
                 
             | _ -> ()
 
@@ -170,15 +203,24 @@ let ring = Array.zeroCreate(numNodes)
 for i in [0 .. numNodes-1] do
     ring.[i] <- system.ActorOf(Props.Create(typeof<Peer>, processController, numRequests, numNodes, i, nearestPow), "Peer" + string i)
 
-//Temporary FingerTable Initialization
+//Empty FingerTable Initialization
 for i in [0 .. numNodes-1] do
     let mutable fingers = Map.empty<int, IActorRef>
     let mutable peerIDTable = Map.empty<int, int>
+    fingers <- fingers |> Map.add i ring.[i]
     for j in [0 .. nearestPow - 1] do
         let x = i + int (2. ** float j) % int (2.** float nearestPow)
         fingers <- fingers |> Map.add x null
         peerIDTable <- peerIDTable |> Map.add x -1
     ring.[i] <! SetFingerTable(fingers, peerIDTable)
+
+//At this point we pick a base peer, which will be the entry point for all other peers with empty peer tables and then
+//once the process of adding peers is complete, we will start sending of messages to all peers in which case even if a
+//peer drops dead then the other peers will have all the info they need to continue the entire process
+
+let baseActor = ring.[0]
+for i in [1 .. numNodes-1] do
+    baseActor <! Join(i, ring.[i])
 
 for i in [0 .. numNodes-1] do
     ring.[i] <! StartRequesting
