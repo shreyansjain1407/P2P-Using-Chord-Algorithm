@@ -10,7 +10,6 @@ open Akka.FSharp
 
 type Message =
     | A of int
-    // | PeerRing of IActorRef[]
     | RequestCompletion of int
     | SendRequest
     | ExitCircle of IActorRef // This can also essentially have just the id to the current node
@@ -24,6 +23,8 @@ type Message =
     | UpdateFingerTable of Map<int, IActorRef>*Map<int,int>
     | UpdateSuccessors
     | RequestFingerTables of IActorRef
+    | PrintFinger
+    | StartUpdation
 
 let system = ActorSystem.Create("System")
 
@@ -60,7 +61,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
     //Counter to keep track of message requests sent by the given peer
     let mutable messageReceipts = 0
     
-    let replace (peerID: int) (currentPeerID: int) =
+    let replace (key: int) (peerID: int) (currentPeerID: int) =
         let mutable distance = 0
         if(currentPeerID < peerID) then
             distance <- peerID - currentPeerID
@@ -87,7 +88,12 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | RequestFwd (reqID, requestingPeer, hops) ->
                 match fingerTable.TryFind(reqID) with
                     | Some actor ->
-                        actor <! Request(requestingPeer, hops + 1)
+                        if actor <> null then
+                            actor <! Request(requestingPeer, hops + 1)
+                        else
+                            let mutable closest = -1
+                            fingerTable |> Map.iter (fun _key _value -> if (_key < reqID || _key > closest) && _value<>null then closest <- _key)
+                            fingerTable.[closest] <! RequestFwd(reqID, requestingPeer, hops + 1)
 
                     | None ->
                         let mutable closest = -1
@@ -97,6 +103,9 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
+            
+            | StartUpdation ->
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, UpdateSuccessors)
                 
             | SendRequest ->
                 //Send a request for a random peer over here
@@ -104,10 +113,15 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 
                 match fingerTable.TryFind(randomPeer) with
                     | Some actor ->
-                        actor <! Request(Actor.Context.Self, 1)
+                        if actor <> null then
+                            actor <! Request(Actor.Context.Self, 1)
+                        else
+                            let mutable closest = -1
+                            fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) && _value<>null then closest <- _key)
+                            fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
                     | None ->
                         let mutable closest = -1
-                        fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) then closest <- _key)
+                        fingerTable |> Map.iter (fun _key _value -> if (_key < randomPeer || _key > closest) && _value<>null then closest <- _key)
                         fingerTable.[closest] <! RequestFwd(randomPeer, Actor.Context.Self, 1)
 
             | SetFingerTable (x, y)->
@@ -125,18 +139,22 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 printfn $"Peer {peerID} has joined the ring"
                 // According to new code, the table will never be entirely empty, It will have null values or -1s
                 fingerTable |> Map.iter (fun _key _value ->
-                    if replace peerID PeerID then
+                    if replace _key peerID PeerID && _key <> PeerID then
                         fingerTable <- fingerTable |> Map.add _key peer
                         fingerPeerID <- fingerPeerID |> Map.add _key peerID
                         //May implement else block if in case needed
                 )
-                fingerTable <- fingerTable |> Map.add peerID peer
+                fingerTable |> Map.iter (fun x y ->
+                    if x <> PeerID && y <> null then
+                        y <! UpdateFingerTable(fingerTable, fingerPeerID))
                 peer <! UpdateFingerTable(fingerTable, fingerPeerID)
                 
-            | UpdateFingerTable (x, y) ->
+            | UpdateFingerTable (fingers, fingerPeers) ->
                 //Function that takes an incoming PeerTable and matches it with the current peer table and updates values
                 printfn $"Peer {PeerID} is updating its fingerTable"
                 let mutable updateSuccessorRequest = false
+                
+                //This needs to be updated and replace function needs to be implemented here for updation
                 fingerPeerID |> Map.iter (fun key' value' ->
                     let mutable lowestValue =
                         if value' = -1 then
@@ -144,14 +162,14 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                         else
                             value'
                     let mutable leastKey = int (2. ** float N)        
-                    y |> Map.iter (fun _key _value ->
-                        if _value < lowestValue && _value >= key' then
+                    fingerPeers |> Map.iter (fun _key _value ->
+                        if _value < lowestValue && _value >= key' && _value<>PeerID then
                             lowestValue <- _value
                             leastKey <- _key
                     )
                     if leastKey <> (int (2. ** float N)) then
                         fingerPeerID <- fingerPeerID |> Map.add key' lowestValue
-                        fingerTable <- fingerTable |> Map.add key' x.[leastKey]
+                        fingerTable <- fingerTable |> Map.add key' fingers.[leastKey]
                         updateSuccessorRequest <- true
                 )
                 if updateSuccessorRequest then
@@ -160,13 +178,18 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | UpdateSuccessors ->
                 let curActor = Actor.Context.Self //I tried to put this in the message itself but for some reason it didn't except it
                 fingerTable |> Map.iter (fun key' value' ->
-                    if value' <> null then
+                    if value' <> null && key'<>PeerID then
+                        printfn $"Peer {PeerID} sent request to peer {fingerPeerID.[key']}"
                         value' <! RequestFingerTables(curActor)
                     )
             
             | RequestFingerTables x ->
                 x <! UpdateFingerTable(fingerTable, fingerPeerID)
                 
+            | PrintFinger ->
+                printfn $"I am peer {PeerID}"
+                printfn "%A" fingerTable
+                printfn "%A" fingerPeerID
             | _ -> ()
 
 //Actual Working starts here
@@ -208,10 +231,12 @@ for i in [0 .. numNodes-1] do
     let mutable fingers = Map.empty<int, IActorRef>
     let mutable peerIDTable = Map.empty<int, int>
     fingers <- fingers |> Map.add i ring.[i]
+    peerIDTable <- peerIDTable |> Map.add i i
     for j in [0 .. nearestPow - 1] do
-        let x = i + int (2. ** float j) % int (2.** float nearestPow)
+        let x = (i + int (2. ** float j)) % int (2.** float nearestPow)
         fingers <- fingers |> Map.add x null
         peerIDTable <- peerIDTable |> Map.add x -1
+//    printfn "%A" fingers
     ring.[i] <! SetFingerTable(fingers, peerIDTable)
 
 //At this point we pick a base peer, which will be the entry point for all other peers with empty peer tables and then
@@ -220,9 +245,26 @@ for i in [0 .. numNodes-1] do
 
 let baseActor = ring.[0]
 for i in [1 .. numNodes-1] do
+    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
     baseActor <! Join(i, ring.[i])
 
+//Debugging Code
+//baseActor <! Join (7, ring.[7])
+//System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
+//baseActor <! PrintFinger
+System.Threading.Thread.Sleep(TimeSpan.FromSeconds(5.))
+//ring.[7] <! PrintFinger
+
+//for i in [0 .. numNodes-1] do
+////    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
+//    ring.[i] <! StartUpdation
+    
+System.Threading.Thread.Sleep(TimeSpan.FromSeconds(3.))
+
 for i in [0 .. numNodes-1] do
-    ring.[i] <! StartRequesting
+    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.0))
+    ring.[i] <! PrintFinger
+//for i in [0 .. numNodes-1] do
+//    ring.[i] <! StartRequesting
 
 Console.ReadLine()
