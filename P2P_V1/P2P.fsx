@@ -12,8 +12,7 @@ type Message =
     | A of int
     | RequestCompletion of int
     | SendRequest
-    | ExitCircle of IActorRef // This can also essentially have just the id to the current node
-    | StartRequesting //This message will start the scheduler which will then start sending request messages
+    | StartRequesting
     | RequestFwd of int*IActorRef*int
     | Request of IActorRef*int
     | SetFingerTable of Map<int,IActorRef>*Map<int,int>
@@ -22,7 +21,6 @@ type Message =
     | UpdateFingerTable of Map<int, IActorRef>*Map<int,int>
     | UpdateSuccessors
     | RequestFingerTables of IActorRef
-    | PrintFinger
     | StartUpdation
 
 let system = ActorSystem.Create("System")
@@ -40,7 +38,6 @@ type ProcessController(nodes: int, requests: int) =
         match receivedMsg :?> Message with 
             | RequestCompletion x ->
                 completedMessages <- completedMessages + 1
-                printfn $":) {completedMessages}"
                 totalHops <-totalHops + x
                 if(completedMessages = totalMessages) then
                     printfn $"All the nodes have completed the number of requests to be made with {(float(totalHops)/float(totalMessages))} average hops"
@@ -51,7 +48,6 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
     inherit Actor()
     //Define required variables here
     let totalPeers = numNodes
-    let mutable cancelRequesting = false
     let mutable fingerTable = Map.empty<int, IActorRef>
     let mutable fingerPeerID = Map.empty<int, int>
     let mutable msgQty = 0
@@ -116,7 +112,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
 
             | StartRequesting ->
                 //Starts Scheduler to schedule SendRequest Message to self mailbox
-                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromMilliseconds(10.), Actor.Context.Self, SendRequest)
+                Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(1.), Actor.Context.Self, SendRequest)
             
             | StartUpdation ->
                 Actor.Context.System.Scheduler.ScheduleTellRepeatedly(TimeSpan.FromSeconds(0.), TimeSpan.FromSeconds(5.), Actor.Context.Self, UpdateSuccessors)
@@ -149,7 +145,7 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
                 processController <! RequestCompletion(x)
                 
             | Join (peerID, peer) ->
-                printfn $"Peer {peerID} has joined the ring"
+                // printfn $"Peer {peerID} has joined the ring"
                 fingerTable |> Map.iter (fun _key _value ->
                     if (replace _key peerID PeerID && _key <> PeerID) || _key = peerID then
                         fingerTable <- fingerTable |> Map.add _key peer
@@ -197,8 +193,8 @@ type Peer(processController: IActorRef, requests: int, numNodes: int, PeerID: in
             | _ -> ()
 
 //Actual Working starts here
-let mutable numNodes = 30000//int (string (fsi.CommandLineArgs.GetValue 1))
-let numRequests = 10//int (string (fsi.CommandLineArgs.GetValue 2))
+let mutable numNodes = int (string (fsi.CommandLineArgs.GetValue 1))
+let numRequests = int (string (fsi.CommandLineArgs.GetValue 2))
 
 let processController = system.ActorOf(Props.Create(typeof<ProcessController>, numNodes, numRequests),"processController")
 let nearestPower n=
@@ -238,12 +234,13 @@ let baseActor = ring.[0]
 for i in [1 .. numNodes-1] do
     baseActor <! Join(i, ring.[i])
 
-System.Threading.Thread.Sleep(TimeSpan.FromSeconds(3.))
-
 for i in [0 .. numNodes-1] do
     ring.[i] <! StartUpdation
     
-System.Threading.Thread.Sleep(TimeSpan.FromSeconds(10.))
+
+for i in [5 .. 0] do
+    printfn $"The message sending will commence in T minus {i}s"
+    System.Threading.Thread.Sleep(TimeSpan.FromSeconds(1.))
     
 printfn "Commence Message Sending"
 for i in [0 .. numNodes-1] do
